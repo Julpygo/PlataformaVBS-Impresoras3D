@@ -1,0 +1,16 @@
+{
+  "name": "server1",
+  "version": "1.0.0",
+  "description": "Servidor OPC-UA con node.js",
+  "main": "Server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js"
+  },
+  "author": "G. Julian",
+  "license": "ISC",
+  "dependencies": {
+    "node-opcua": "^2.29.0",
+    "python-shell": "^2.0.3"
+  }
+}
