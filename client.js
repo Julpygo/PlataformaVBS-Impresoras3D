@@ -13,7 +13,7 @@ client.on("backoff", (retry, delay) =>
   console.log(
     "Intentando conectarse a ",
     endpointUrl,
-    ": reintentando =",
+    ": Intento =",
     retry,
     "próximo intento en ",
     delay / 1000,
@@ -25,8 +25,16 @@ let the_session, the_subscription;
 
 //Conexion Mongodb
 
-const uri = "mongodb+srv://lianju:Yuligb1996@cluster0.z4spe.mongodb.net/myFirstDatabase?retryWrites=true&w=majority"
-const clientmongo = new MongoClient(uri, {useNewUrlParser: true});
+//url de conexion
+const url = "mongodb+srv://lianju:Yuligb1996@cluster0.z4spe.mongodb.net/myFirstDatabase?retryWrites=true&w=majority"
+//Nombre de la base de datos
+const dbName = "VarImpresora3D";
+//Nombre de la coleccion
+const dbcollec = "Historial de datos";
+
+MongoClient.connect(url,function(err, client){
+     collection = client.db(dbName).collection(dbcollec);
+});
 
 async.series([
 
@@ -146,6 +154,9 @@ async.series([
                "monitored item changed:  % PosIndirect X = ",
                dataValue.value.value
              );
+             collection.insertOne({ 
+                  valor: dataValue.value.value, 
+                  time: dataValue.serverTimestamp})
            });
            callback();
          }
