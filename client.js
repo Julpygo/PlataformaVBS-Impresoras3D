@@ -1,192 +1,163 @@
-const { OPCUAClient, AttributeIds, resolveNodeId, TimestampsToReturn} = require("node-opcua");
-const async = require("async");
+/* 
+IMPORTACION DE MODULOS, DEBEN ESTAR PREVIAMENTE INSTALADOS
+ */
+const { OPCUAClient, AttributeIds, TimestampsToReturn, ClientAlarm} = require("node-opcua");
 const MongoClient = require('mongodb').MongoClient;
+const {cyan, bgRed} = require("chalk");
+const listen = require("socket.io");
+const express = require("express");
+const async = require("async");
 
+/* 
+CREACION DE CONSTANTES PARA LA COMUNICACION Y LA BASE DE DATOS
+ */
 
-// const endpointUrl = "opc.tcp://<hostname>:4334/UA/MyLittleServer";
+//opc ua
 const endpointUrl = "opc.tcp://" + require("os").hostname() + ":4334/UA/ImpresoraServer";
-const client = OPCUAClient.create({
-    endpoint_must_exist: false
-});
+const nodeIdToMonitor = "ns=1;i=1055";
+//aplicacion web
+const port = 3700;
 
-client.on("backoff", (retry, delay) =>
-  console.log(
-    "Intentando conectarse a ",
-    endpointUrl,
-    ": Intento =",
-    retry,
-    "próximo intento en ",
-    delay / 1000,
-    "seconds"
-  )
-);
+//mongo db
+const uri = "mongodb+srv://lianju:Yuligb1996@cluster0.z4spe.mongodb.net/myFirstDatabase?retryWrites=true&w=majority";
+const clientmongo = new MongoClient(uri, {useNewUrlParser: true, useUnifiedTopology: true});
 
-let the_session, the_subscription;
+/* 
+EL CODIGO PRINCIPAL VA EN LA FUNCION ASYNC
+ */
 
-//Conexion Mongodb
+(async () => {    //await
+  try {
+    // crear cliente opc ua
+    const client = OPCUAClient.create();
 
-//url de conexion
-const url = "mongodb+srv://lianju:Yuligb1996@cluster0.z4spe.mongodb.net/myFirstDatabase?retryWrites=true&w=majority"
-//Nombre de la base de datos
-const dbName = "VarImpresora3D";
-//Nombre de la coleccion
-const dbcollec = "Historial de datos";
+    // avisar cuando se esta intentando reconectar
+    client.on("backoff", (retry, delay) => {
+      console.log("Intentando conectarse a ", endpointUrl,
+      ": Intento =", retry,
+      "próximo intento en ", delay / 1000, "segundos")
+    });
 
-MongoClient.connect(url,function(err, client){
-     collection = client.db(dbName).collection(dbcollec);
-});
+    // mostrar la url cuando se logre conectar
+    console.log(" Conectando a ", cyan(endpointUrl));
+    await client.connect(endpointUrl);
+    console.log(" Conectado a ", cyan(endpointUrl));
 
-async.series([
+    // iniciar la sesion para interactuar con el servidor opc ua
+    const session = await client.createSession();
+    console.log("Sesion iniciada".yellow);
 
-    // step 1 : connect to
-    function(callback)  {
-        client.connect(endpointUrl, function(err) {
-          if (err) {
-            console.log(" no se pudo conectar a el endpoint :", endpointUrl);
-          } else {
-            console.log("conectado!");
-          }
-          callback(err);
-        });
-    },
+    // crear una sucripcion
+    const subscription = await session.createSubscription2({
+      requestedPublishingInterval: 200,   //intervalo de tiempo en el cual se publica la solicitud
+      requestedMaxKeepAliveCount: 20,     //intentos maximos para recuperar la conexion
+      publishingEnabled: true,            //habilitar la publicacion
+    });
 
-    // step 2 : createSession
-    function(callback) {
-        client.createSession(function(err, session) {
-          if (err) {
-            return callback(err);
-          }
-          the_session = session;
-          callback();
-        });
-    },
+    /* 
+    SE INICIA EL MONITOREO DE LA VARIABLE DEL SERVIDOR OPC UA
+     */
+    
+    // crear el item con su nodeId y atributo
+    const itemToMonitor = {
+      nodeId: nodeIdToMonitor,
+      AttributeIds: AttributeIds.Value
+    };
+    
+    // definir los parametros de monitoreo
+    const parameters = {
+      samplingInterval: 50,   //tiempo de muestreo
+      discardOldest: true,    //descartar datos anteriores
+      queueSize: 100          //tamaño de la cola de datos
+    };
 
-    // step 3 : browse
-    function(callback) {
-       the_session.browse("RootFolder", function(err, browseResult) {
-         if (!err) {
-           console.log("Buscando rootfolder: ");
-           for (let reference of browseResult.references) {
-             console.log(reference.browseName.toString(), reference.nodeId.toString());
-           }
-         }
-         callback(err);
-       });
-    },
+    // crear el objeto de monitore 
+    const monitoredItem = await subscription.monitor(itemToMonitor, parameters, TimestampsToReturn.Both);
 
-    // step 4 : read a variable with readVariableValue
-    function(callback) {
-       the_session.read({nodeId: "ns=1;i=1055", attributeId: AttributeIds.Value}, (err, dataValue) => {
-         if (!err) {
-           console.log(" PosIndirect x = ", dataValue.toString());
-         }
-         callback(err);
-       });
-    },
+    /* 
+    CREAR LA APLICACION WEB
+     */
 
-    // step 4' : read a variable with read
-    function(callback) {
-       const maxAge = 0;
-       const nodeToRead = {
-         nodeId: "ns=1;i=1055",
-         attributeId: AttributeIds.Value
-       };
-       
-       the_session.read(nodeToRead, maxAge, function(err, dataValue) {
-         if (!err) {
-           console.log(" PosIndirect x = ", dataValue.toString());
-         }
-         callback(err);
-       });
-    },
+    const app = express();
+    app.set("view engine", "html");
 
-    // step 5: install a subscription and install a monitored item for 10 seconds
-    function(callback) {
-       const subscriptionOptions = {
-         maxNotificationsPerPublish: 1000,
-         publishingEnabled: true,
-         requestedLifetimeCount: 100,
-         requestedMaxKeepAliveCount: 10,    //Intentos maximos de conexion
-         requestedPublishingInterval: 1000
-       };
-       the_session.createSubscription2(subscriptionOptions, (err, subscription) => {
-         if (err) {
-           return callback(err);
-         }
-       
-         the_subscription = subscription;
-       
-         the_subscription
-           .on("started", () => {
-             console.log(
-               "subscription started for 2 seconds - subscriptionId=",
-               the_subscription.subscriptionId
-             );
-           })
-           .on("keepalive", function() {
-             console.log("subscription keepalive");
-           })
-           .on("terminated", function() {
-             console.log("terminated");
-           });
-         callback();
-       });
-    },
-    function(callback) {
-       // install monitored item
-       const itemToMonitor = {
-         nodeId: resolveNodeId("ns=1;i=1055"),
-         attributeId: AttributeIds.Value
-       };
-       const monitoringParamaters = {
-         samplingInterval: 100,   //intervalo de muestreo
-         discardOldest: true,     //Descartar datos anteriores (no historicos)
-         queueSize: 10            //tamaño de la cola de datos
-       };
-       
-       the_subscription.monitor(
-         itemToMonitor,
-         monitoringParamaters,
-         TimestampsToReturn.Both,
-         (err, monitoredItem) => {
-           monitoredItem.on("changed", function(dataValue) {
-             console.log(
-               "monitored item changed:  % PosIndirect X = ",
-               dataValue.value.value
-             );
-             collection.insertOne({ 
-                  valor: dataValue.value.value, 
-                  time: dataValue.serverTimestamp})
-           });
-           callback();
-         }
-       );
-       console.log("-------------------------------------");
-    },
-    function(callback) {
-        // wait a little bit : 10 seconds
-        setTimeout(()=>callback(), 10*1000);
-    },
-    // terminate session
-    function(callback) {
-        the_subscription.terminate(callback);;
-    },
-    // close session
-    function(callback) {
-        the_session.close(function(err) {
-          if (err) {
-            console.log("closing session failed ?");
-          }
-          callback();
-        });
-    }
+    // definir el directorio de estaticos
+    app.use(express.static(__dirname + '/'));
+    app.set('Views', __dirname + '/');
 
-],
-function(err) {
-    if (err) {
-        console.log(" failure ",err);
-    } else {
-        console.log("done!");
-    }
-    client.disconnect(function(){});
-}) ;
+    // definir como se responde cuando el navegador solicita entrar
+    app.get("/", function(req,res){
+      res.render('index.html');
+    })
+
+    /* 
+    SE CREA UN OBJETO LISTEN PARA ENVIAR DATOS A LA APLICACION WEB
+    IO.SOCKET --> "REAL-TIME BIDIRECTIONAL EVENT-BASED COMMUNICATION"
+     */
+
+    // asociar el puerto a la app web
+    const io = listen(app.listen(port));
+
+    // esperar la conexion
+    io.sockets.on('connection', function(socket){
+    });
+
+    // mostrar el url para entrar a la aplicacion web
+    console.log("visit http://localhost:" + port);
+
+    /* 
+    CONEXION A LA BASE DE DATOS
+     */
+
+    // conectar al cliente
+    await clientmongo.connect();
+
+    // conectarse a la coleccion con los datos del mongodb atlas
+    const collection = clientmongo.db("VarImpresora3D").collection("Historial de datos");
+
+    /* 
+    DEFINIMOS QUE HACER CUANDO LA VARIABLE MONITOREADA CAMBIE
+     */
+    monitoredItem.on("changed", (dataValue) => {
+      //escribir valor en mongo
+      collection.insertOne({
+        valor: dataValue.value.value, 
+        time: dataValue.serverTimestamp
+      });
+      io.sockets.emit("message", {
+        value: dataValue.value.value,
+        timestamp: dataValue.serverTimestamp,
+        nodeId: nodeIdToMonitor,
+        browseName: "Nombre"
+      });
+
+    });
+
+
+    /* 
+    SALIR AL PRESIONAR CTRL + C
+     */
+    let running = true;
+    process.on("SIGINT", async () => {
+      if (!running){
+        return;   // avoid calling shutdown twice
+      }
+      console.log("shutting down client");
+      running = false;
+      await clientmongo.close();
+      await subscription.terminate();
+      await session.close();
+      await client.disconnect();
+      console.log("Done");
+      process.exit(0);
+    });
+  }
+  catch(err){
+    /* 
+    CODIGO DE EJECUCION SI OCURRE UN ERROR EN EL BLOQUE TRY
+     */
+    console.log(bgRed.white("Error" + err.message));
+    console.log(err);
+    process.exit(-1);
+  }
+})();   //La funcion se estara ejecutando

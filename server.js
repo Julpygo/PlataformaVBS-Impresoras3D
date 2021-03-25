@@ -2,7 +2,7 @@
 // node server.js
 //IMPORTACION DE LIBRERIAS
 
-const { OPCUAServer, Variant, DataType, nodesets, } = require("node-opcua");
+const { OPCUAServer, Variant, DataType, nodesets, randomFloat, } = require("node-opcua");
 const chalk = require("chalk");
 const {spawn} = require('child_process');
 
@@ -108,7 +108,7 @@ const userManager = {
 
     const PosIndirect = addressSpace.findNode("ns=1;i=1055");
     setInterval(() => {
-        PosIndirect.setValueFromSource({dataType: "Float", value: PosX})
+        PosIndirect.setValueFromSource({dataType: "Float", value: PosX+randomFloat()})
     }, 1000);
 
 
