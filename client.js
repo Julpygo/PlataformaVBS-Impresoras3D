@@ -4,9 +4,10 @@ IMPORTACION DE MODULOS, DEBEN ESTAR PREVIAMENTE INSTALADOS
 const { OPCUAClient, AttributeIds, TimestampsToReturn, ClientAlarm} = require("node-opcua");
 const MongoClient = require('mongodb').MongoClient;
 const {cyan, bgRed} = require("chalk");
-const listen = require("socket.io");
+const SocketIO = require('socket.io');
 const express = require("express");
 const async = require("async");
+const path = require('path');
 
 /* 
 CREACION DE CONSTANTES PARA LA COMUNICACION Y LA BASE DE DATOS
@@ -16,11 +17,12 @@ CREACION DE CONSTANTES PARA LA COMUNICACION Y LA BASE DE DATOS
 const endpointUrl = "opc.tcp://" + require("os").hostname() + ":4334/UA/ImpresoraServer";
 const nodeIdToMonitor = "ns=1;i=1055";
 //aplicacion web
-const port = 3700;
+const port = 3000;
 
 //mongo db
 const uri = "mongodb+srv://lianju:Yuligb1996@cluster0.z4spe.mongodb.net/myFirstDatabase?retryWrites=true&w=majority";
 const clientmongo = new MongoClient(uri, {useNewUrlParser: true, useUnifiedTopology: true});
+
 
 /* 
 EL CODIGO PRINCIPAL VA EN LA FUNCION ASYNC
@@ -45,7 +47,7 @@ EL CODIGO PRINCIPAL VA EN LA FUNCION ASYNC
 
     // iniciar la sesion para interactuar con el servidor opc ua
     const session = await client.createSession();
-    console.log("Sesion iniciada".yellow);
+    console.log("Sesion iniciada");
 
     // crear una sucripcion
     const subscription = await session.createSubscription2({
@@ -73,37 +75,6 @@ EL CODIGO PRINCIPAL VA EN LA FUNCION ASYNC
 
     // crear el objeto de monitore 
     const monitoredItem = await subscription.monitor(itemToMonitor, parameters, TimestampsToReturn.Both);
-
-    /* 
-    CREAR LA APLICACION WEB
-     */
-
-    const app = express();
-    app.set("view engine", "html");
-
-    // definir el directorio de estaticos
-    app.use(express.static(__dirname + '/'));
-    app.set('Views', __dirname + '/');
-
-    // definir como se responde cuando el navegador solicita entrar
-    app.get("/", function(req,res){
-      res.render('index.html');
-    })
-
-    /* 
-    SE CREA UN OBJETO LISTEN PARA ENVIAR DATOS A LA APLICACION WEB
-    IO.SOCKET --> "REAL-TIME BIDIRECTIONAL EVENT-BASED COMMUNICATION"
-     */
-
-    // asociar el puerto a la app web
-    const io = listen(app.listen(port));
-
-    // esperar la conexion
-    io.sockets.on('connection', function(socket){
-    });
-
-    // mostrar el url para entrar a la aplicacion web
-    console.log("visit http://localhost:" + port);
 
     /* 
     CONEXION A LA BASE DE DATOS
@@ -161,3 +132,38 @@ EL CODIGO PRINCIPAL VA EN LA FUNCION ASYNC
     process.exit(-1);
   }
 })();   //La funcion se estara ejecutando
+
+
+/* 
+CREAR LA APLICACION WEB
+  */
+
+const app = express();
+
+// configuraciones
+app.set('port', process.env.PORT || port);
+app.set("view engine", "html");
+
+// definir el directorio de estaticos
+app.use(express.static(path.join(__dirname, 'public')));
+app.set('Views', __dirname + '/');
+
+// Que hacer cuando se solicite desde el navegador
+app.get("/", function(req,res){
+  res.render('index.html');
+})
+
+// Iniciar server
+const server = app.listen(app.get('port'), ()=> {
+  console.log('server on port ', app.get('port'));
+});
+
+// websockets
+const io = SocketIO(server);
+
+io.on('connection', (socket) => {
+  console.log('new conexion',socket.id);
+});
+
+// mostrar el url para entrar a la aplicacion web
+console.log("visit http://localhost:" + port); 

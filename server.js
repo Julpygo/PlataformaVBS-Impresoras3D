@@ -108,7 +108,7 @@ const userManager = {
 
     const PosIndirect = addressSpace.findNode("ns=1;i=1055");
     setInterval(() => {
-        PosIndirect.setValueFromSource({dataType: "Float", value: PosX+randomFloat()})
+        PosIndirect.setValueFromSource({dataType: "Float", value: Math.random()*2 + PosX})
     }, 1000);
 
 

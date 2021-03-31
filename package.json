@@ -5,7 +5,8 @@
   "main": "Server.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node server.js"
+    "server": "nodemon server.js",
+    "client": "nodemon client.js"
   },
   "author": "G. Julian",
   "license": "ISC",
@@ -14,7 +15,11 @@
     "express": "^4.17.1",
     "mongodb": "^3.6.5",
     "node-opcua": "^2.29.0",
+    "path": "^0.12.7",
     "python-shell": "^2.0.3",
     "socket.io": "^4.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.7"
   }
 }
