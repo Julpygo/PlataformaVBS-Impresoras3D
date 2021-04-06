@@ -3,7 +3,7 @@ IMPORTACION DE MODULOS, DEBEN ESTAR PREVIAMENTE INSTALADOS
  */
 const { OPCUAClient, AttributeIds, TimestampsToReturn, ClientAlarm} = require("node-opcua");
 const MongoClient = require('mongodb').MongoClient;
-const {cyan, bgRed} = require("chalk");
+const {cyan, bgRed, yellow} = require("chalk");
 const SocketIO = require('socket.io');
 const express = require("express");
 const async = require("async");
@@ -47,7 +47,7 @@ EL CODIGO PRINCIPAL VA EN LA FUNCION ASYNC
 
     // iniciar la sesion para interactuar con el servidor opc ua
     const session = await client.createSession();
-    console.log("Sesion iniciada");
+    console.log(yellow("Sesion iniciada"));
 
     // crear una sucripcion
     const subscription = await session.createSubscription2({
