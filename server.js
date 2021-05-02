@@ -1,16 +1,19 @@
+// IMPORTACION DE LIBRERIAS
 
-// node server.js
-//IMPORTACION DE LIBRERIAS
-
-const { OPCUAServer, Variant, DataType, nodesets, randomFloat, } = require("node-opcua");
+const { OPCUAServer, Variant, DataType, nodesets,StatusCodes } = require("node-opcua");
 const chalk = require("chalk");
 const {spawn} = require('child_process');
+const SerialPort = require('serialport');
+const { Namespace } = require("socket.io");
+// const raspi = require('raspi');
+// const I2C = require('raspi-i2c').I2C;
 
-//VARIABLES INICIALES
+// VARIABLES Globales
 
 PosX = '';
 PosY = '';
 PosZ = '';
+strdata = '';
 
 // CONFIGURACION DE USUARIOS
 const userManager = {
@@ -29,8 +32,9 @@ const userManager = {
 // CODIGO ASINCRONO SERVIDOR
 
 (async () => {
-    //CONFIGURACION DEL SERVIDOR
     
+    //CONFIGURACION DEL SERVIDOR
+
     const server = new OPCUAServer({
         nodeset_filename: [
 
@@ -50,105 +54,188 @@ const userManager = {
         }
     });
 
-    // INICIALIZACION DEL SERVIDOR
-    await server.initialize(); //node server.js 
+    // CONSTRUCCION DEL ESPACIO DE DIRECCIONES DEL SERVIDOR
 
-    const addressSpace = server.engine.addressSpace;
-    const rootFolder = addressSpace.findNode("RootFolder");
-    const nsCnc = addressSpace.getNamespaceIndex("http://opcfoundation.org/UA/CNC"); //NS DE TYPE CNC(URI)
+    await server.initialize();
+    const addressSpace = server.engine.addressSpace;    // generar addressSpace inicial
+    const nsCnc = addressSpace.getNamespaceIndex("http://opcfoundation.org/UA/CNC"); // NS DEL TYPE CNC(URI)
+    const namespace = addressSpace.getOwnNamespace();   // Crear nuestro namespace(NS)
+
+    // buscar objectTypes para instanciarlos posteriormente
     const CncInterfaceType = addressSpace.findObjectType("CncInterfaceType",nsCnc);
     const CncAxisType = addressSpace.findObjectType("CncAxisType",nsCnc);
 
-    const namespace = addressSpace.getOwnNamespace();
-
-    //ESPACIO PARA CONSTRUIR Y MAPEAR OBJETOS
-
+    //ESPACIO PARA INSTANCIAR, CREAR Y MAPEAR (OBJETOS, VARIABLES, METODOS)
+    
+    // Crear objetos
     const impresora = namespace.addObject({
         organizedBy: addressSpace.rootFolder.objects,
         browseName: "AAS Impresora"
     });
+
     const activo = namespace.addObject({
         componentOf: impresora,
         browseName: "Activo"
     });
+
     const documentacion = namespace.addObject({
         componentOf: impresora,
         browseName: "Documentacion"
     });
+
     const identificacion = namespace.addObject({
         componentOf: impresora,
         browseName: "Identificacion"
     });
+
+    
+    // instanciar objectTypes
     const opc40502 = CncInterfaceType.instantiate({
         browseName: "OPC 40502",
         componentOf: impresora,
     });
 
-
-    const CncAxisList = addressSpace.findNode("ns=1;i=1005");
+    const CncAxisList = addressSpace.findNode("ns=1;i=1005"); // nodo de nivel inferior de CncInterface
     const CncAxisExtrusor = CncAxisType.instantiate({
         browseName: "Eje Extrusor",
         componentOf: CncAxisList,
     });
+
     const CncAxisX = CncAxisType.instantiate({
         browseName: "Eje X",
         componentOf: CncAxisList,
     });
+
     const CncAxisY = CncAxisType.instantiate({
         browseName: "Eje Y",
         componentOf: CncAxisList,
     });
+
     const CncAxisZ = CncAxisType.instantiate({
         browseName: "Eje Z",
         componentOf: CncAxisList,
     });
 
+
+    // buscar nodos a mapear
     const IsRotational = addressSpace.findNode("ns=1;i=1014");
+    const ActPosX = addressSpace.findNode("ns=1;i=1056");
+    const ActPosY = addressSpace.findNode("ns=1;i=1090");
+    const ActPosZ = addressSpace.findNode("ns=1;i=1124");
+
+    // mapear variables
     IsRotational.setValueFromSource({ dataType: "Boolean", value: true});
 
-    const PosIndirect = addressSpace.findNode("ns=1;i=1055");
     setInterval(() => {
-        PosIndirect.setValueFromSource({dataType: "Float", value: Math.random()*50 + PosX})
-    }, 1000);
+        ActPosX.setValueFromSource({dataType: "Double", value: PosX})
+        ActPosY.setValueFromSource({dataType: "Double", value: PosY})
+        ActPosZ.setValueFromSource({dataType: "Double", value: PosZ})
+    }, 500);
 
-
-    //ARRANCA SERVIDOR LISTO PARA CONEXION
+    //Crear metodos
     
+    const method = namespace.addMethod(opc40502,{
+
+        browseName: "Write Serial",
+        
+        inputArguments:  [
+            {
+                name:"Gcode, Mcode",
+                description: { text: "Escribir codigo a enviar" },
+                dataType: DataType.String
+            }
+         ],
+         
+         outputArguments: [{
+             name:"Confirmacion",
+             description:{ text: "Confirmar envio" },
+             dataType: DataType.String ,
+        }]
+    });
+
+    
+    method.bindMethod((inputArguments,context,callback) => {
+        
+        const inCode =  inputArguments[0].value;
+        mySerial.write(inCode);
+    
+        const callMethodResult = {
+            statusCode: StatusCodes.Good,
+            outputArguments: [{
+                    dataType: DataType.String,
+                    value : "Codigo enviado"
+            }]
+        };
+        callback(null,callMethodResult);
+    });
+    
+    // ESPERAR CONFIGURACION DEL SERVIDOR PARA COMENZAR A EXPONERSE
     await server.start();
+    const endpointUrl = server.getEndpointUrl();  // obtener informacion del punto de acceso
 
-    const endpointUrl = server.getEndpointUrl();
-
+    // mostrar en consola la informacion del servidor
     console.log(chalk.yellow("  server on port      :"), chalk.cyan(server.endpoints[0].port.toString()));
     console.log(chalk.yellow("  endpointUrl         :"), chalk.cyan(endpointUrl));
     console.log(chalk.yellow("\n  server now waiting for connections. CTRL+C to stop"));
 
-    console.log(chalk.cyan("\nvisit https://www.sterfive.com for more advanced examples and professional support."));
+    console.log(chalk.cyan("visit https://www.sterfive.com for more advanced examples and professional support."));
 
+    // PROCESO DE SALIDA O PARADA DEL SERVIDOR
     process.on("SIGINT", async () => {
-        // only work on li  nux apparently
+        // only work on linux apparently
         await server.shutdown(1000);
         console.log(chalk.red.bold(" shutting down completed "));
         process.exit(-1);
     });
 })();
 
-// SCRIPT DE PYTHON
+// APP COMUNICACION SERIAL
 
-setInterval(() => {
-    const process1 = spawn('python', ['./Funciones/Sender.py']);
-    process1.stdout.on('data', data => {
-        datosPy = `${data}`;
-        if(datosPy != ''){
-            indX = datosPy.search('X');
-            indY = datosPy.search('Y');
-            indZ = datosPy.search('Z');
-            PosX = Number(datosPy.slice(indX+2,indY-1));
-            indT = datosPy.search('T');
-            indTf = datosPy.search('/');
-            Thot = Number(datosPy.slice(indT+2,indTf-1))
-            console.log(datosPy);
-            console.log(PosX);
-            console.log(Thot);
-        }
-    });     
-}, 9000);
+const Readline = SerialPort.parsers.Readline;
+const parser = new Readline();
+
+const mySerial = new SerialPort("COM2",{
+    baudRate: 115200
+})
+
+mySerial.on('open', function(){
+    console.log('puerto serial abierto');
+});
+
+mySerial.on('data', function(data){
+    let binarios = data;    //buffers recividos
+    let datosSerial = binarios.toString();  //Decodificacion a str
+    let fin = datosSerial.search('\r\n');
+    if(fin != -1){
+        strdata = strdata + datosSerial;
+        let indX = strdata.search('X');
+        let indY = strdata.search('Y');
+        let indZ = strdata.search('Z');
+        let indArro = strdata.search('@');
+        PosX = Number(strdata.slice(indX+2,indY-1));
+        PosY = Number(strdata.slice(indY+2,indZ-1));
+        PosZ = Number(strdata.slice(indZ+2,indArro-1));
+        let indT = strdata.search('T');
+        let indTf = strdata.search('/');
+        Thot = Number(strdata.slice(indT+2,indTf-1))
+        strdata = '';
+    }
+    else{
+        strdata = strdata + datosSerial;
+    };
+});
+
+mySerial.on('err', function(err){
+    console.log(err.message);
+});
+
+setInterval(()=>{
+    mySerial.write("M114 M105\r\n");
+},5000);
+
+// // Comunicacion I2C
+
+// raspi.init(() => {
+//   const i2c = new I2C();
+//   console.log(i2c.readByteSync(0x18)); // Read one byte from the device at address 18
+// });

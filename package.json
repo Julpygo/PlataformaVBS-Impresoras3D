@@ -17,6 +17,7 @@
     "node-opcua": "^2.29.0",
     "path": "^0.12.7",
     "python-shell": "^2.0.3",
+    "serialport": "^9.0.7",
     "socket.io": "^4.0.0"
   },
   "devDependencies": {
